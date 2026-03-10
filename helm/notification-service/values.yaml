@@ -1,0 +1,25 @@
+replicaCount: 1
+
+image:
+  repository: notification-service
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 8002
+
+dapr:
+  enabled: true
+  appId: notification-service
+  appPort: 8002
+  logLevel: info
+  config: dapr-config
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi

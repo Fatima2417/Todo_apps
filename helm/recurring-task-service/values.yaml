@@ -1,0 +1,31 @@
+replicaCount: 1
+
+image:
+  repository: recurring-task-service
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 8001
+
+dapr:
+  enabled: true
+  appId: recurring-task-service
+  appPort: 8001
+  logLevel: info
+  config: dapr-config
+
+env:
+  - name: DAPR_HTTP_PORT
+    value: "3500"
+  - name: BACKEND_APP_ID
+    value: "todo-backend"
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi

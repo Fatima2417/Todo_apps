@@ -1,0 +1,21 @@
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: audit-task-subscription
+spec:
+  pubsubname: pubsub
+  topic: task-events
+  route: /task-event
+  metadata:
+    rawPayload: "false"
+---
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: audit-reminder-subscription
+spec:
+  pubsubname: pubsub
+  topic: reminders
+  route: /reminder-event
+  metadata:
+    rawPayload: "false"

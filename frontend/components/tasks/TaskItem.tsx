@@ -2,6 +2,8 @@
 
 import { Task } from '@/lib/types';
 import { useToggleTaskCompletion } from '@/lib/tasks-query';
+import PriorityBadge from './PriorityBadge';
+import TagChip from './TagChip';
 
 interface TaskItemProps {
   task: Task;
@@ -11,7 +13,7 @@ interface TaskItemProps {
   onToggleComplete?: (taskId: number, completed: boolean) => void; // Optional if handled via mutation inside
 }
 
-// Since TaskItem is used in TaskList which is used in TaskDashboard, 
+// Since TaskItem is used in TaskList which is used in TaskDashboard,
 // and TaskDashboard provides the mutation handlers, we should use them.
 // However, the user's snippet in the prompt showed:
 // onDelete={(taskId) => deleteMutation.mutate(taskId)}
@@ -19,6 +21,19 @@ interface TaskItemProps {
 
 export function TaskItem({ task, userId, onEdit, onDelete }: TaskItemProps) {
   const toggleMutation = useToggleTaskCompletion();
+
+  // 🎯 DEBUG: Log task data to verify what we're receiving
+  console.log('🎯 Rendering task:', {
+    id: task.id,
+    title: task.title,
+    priority: task.priority,
+    tags: task.tags,
+    hasPriority: !!task.priority,
+    hasTags: task.tags?.length > 0,
+    priorityType: typeof task.priority,
+    tagsType: typeof task.tags,
+    rawTask: task
+  });
 
   const handleToggle = () => {
     toggleMutation.mutate({
@@ -28,11 +43,22 @@ export function TaskItem({ task, userId, onEdit, onDelete }: TaskItemProps) {
     });
   };
 
+  // Check if task is overdue
+  const isOverdue = task.due_date && !task.completed && new Date(task.due_date) < new Date();
+
+  // Normalize priority - handle null/undefined/missing values
+  const taskPriority = (task.priority || 'medium') as 'low' | 'medium' | 'high';
+
+  // Normalize tags - handle null/undefined/missing values
+  const taskTags = task.tags || [];
+
   return (
-    <div 
+    <div
       className={`group flex items-center justify-between p-4 rounded-lg border transition-all duration-200 ${
-        task.completed 
-          ? 'bg-green-50 border-green-200 shadow-sm' 
+        task.completed
+          ? 'bg-green-50 border-green-200 shadow-sm'
+          : isOverdue
+          ? 'bg-red-50 border-red-300 hover:border-red-400 hover:shadow-md'
           : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-md'
       }`}
     >
@@ -53,23 +79,78 @@ export function TaskItem({ task, userId, onEdit, onDelete }: TaskItemProps) {
           )}
           {!task.completed && <div className="h-4 w-4" />}
         </button>
-        
-        <div className="flex-1 min-w-0">
-          <h3 
-            className={`text-sm font-medium truncate ${
-              task.completed ? 'text-green-800 line-through' : 'text-gray-900'
-            }`}
-          >
-            {task.title}
-          </h3>
+
+        <div className="flex-1 min-w-0 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3
+              className={`text-sm font-medium truncate ${
+                task.completed ? 'text-green-800 line-through' : isOverdue ? 'text-red-800' : 'text-gray-900'
+              }`}
+            >
+              {task.title}
+            </h3>
+            {/* ALWAYS show priority badge - use normalized value */}
+            <PriorityBadge priority={taskPriority} />
+            {isOverdue && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
+                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                OVERDUE
+              </span>
+            )}
+            {task.recurring_pattern && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 border border-purple-200">
+                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                {task.recurring_pattern}
+              </span>
+            )}
+            {task.parent_task_id && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                Recurring #{task.parent_task_id}
+              </span>
+            )}
+          </div>
           {task.description && (
-            <p 
+            <p
               className={`text-xs truncate ${
                 task.completed ? 'text-green-600' : 'text-gray-500'
               }`}
             >
               {task.description}
             </p>
+          )}
+          {(task.due_date || task.remind_at) && (
+            <div className="flex items-center gap-3 text-xs text-gray-500">
+              {task.due_date && (
+                <span className="flex items-center gap-1">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  Due: {new Date(task.due_date).toLocaleString()}
+                </span>
+              )}
+              {task.remind_at && (
+                <span className="flex items-center gap-1">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                  </svg>
+                  Reminder: {new Date(task.remind_at).toLocaleString()}
+                </span>
+              )}
+            </div>
+          )}
+          {/* ALWAYS show tags section - use normalized value */}
+          {taskTags.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {taskTags.map((tag) => (
+                <TagChip key={tag} tag={tag} className="text-xs" />
+              ))}
+            </div>
+          ) : (
+            <div className="text-xs text-gray-400 italic">No tags</div>
           )}
         </div>
       </div>

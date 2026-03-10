@@ -1,0 +1,25 @@
+replicaCount: 1
+
+image:
+  repository: audit-service
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 8003
+
+dapr:
+  enabled: true
+  appId: audit-service
+  appPort: 8003
+  logLevel: info
+  config: dapr-config
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi

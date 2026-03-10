@@ -12,19 +12,46 @@ const TASK_QUERY_KEY = 'task';
 /**
  * Hook to fetch all tasks for a specific user
  */
-export const useTasks = (user_id: string, completedFilter?: boolean | null) => {
+export const useTasks = (
+  user_id: string,
+  completedFilter?: boolean | null,
+  sortBy?: string,
+  sortOrder?: string
+) => {
   const queryKey: any[] = [TASKS_QUERY_KEY, user_id];
   if (completedFilter !== undefined && completedFilter !== null) {
     queryKey.push({ completed: completedFilter });
   }
-  
+  if (sortBy) {
+    queryKey.push({ sortBy, sortOrder });
+  }
+
   return useQuery({
     queryKey,
     queryFn: async () => {
-      const params = completedFilter !== undefined && completedFilter !== null
-        ? `?completed=${completedFilter}`
-        : '';
-      return apiClient<Task[]>(`/api/v1/${user_id}/tasks${params}`);
+      const params = new URLSearchParams();
+      if (completedFilter !== undefined && completedFilter !== null) {
+        params.append('completed', String(completedFilter));
+      }
+      if (sortBy) {
+        params.append('sort_by', sortBy);
+      }
+      if (sortOrder) {
+        params.append('sort_order', sortOrder);
+      }
+      const queryString = params.toString();
+      const response = await apiClient<any>(`/api/v1/${user_id}/tasks${queryString ? `?${queryString}` : ''}`);
+      // Backend returns { tasks: Task[], total: number }
+      // Extract the tasks array
+      if (response && Array.isArray(response.tasks)) {
+        return response.tasks;
+      }
+      // Fallback: if response is already an array, return it
+      if (Array.isArray(response)) {
+        return response;
+      }
+      // Last resort: return empty array
+      return [];
     },
     enabled: !!user_id,
   });
@@ -50,8 +77,11 @@ export const useCreateTask = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ user_id, taskData }: { user_id: string; taskData: TaskCreateInput }) => {        
-      return apiClient.post<Task>(`/api/v1/${user_id}/tasks`, taskData);
+    mutationFn: async ({ user_id, taskData }: { user_id: string; taskData: TaskCreateInput }) => {
+      console.log('🔵 API Client sending task data:', taskData);
+      const result = await apiClient.post<Task>(`/api/v1/${user_id}/tasks`, taskData);
+      console.log('🟢 API Client received response:', result);
+      return result;
     },
     // Optimistic update
     onMutate: async (variables) => {
@@ -67,6 +97,14 @@ export const useCreateTask = () => {
           user_id: variables.user_id,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
+          completed_at: null,
+          priority: variables.taskData.priority || 'medium',
+          tags: variables.taskData.tags || [],
+          due_date: variables.taskData.due_date || null,
+          remind_at: variables.taskData.remind_at || null,
+          recurring_pattern: variables.taskData.recurring_pattern || null,
+          is_recurring: false,
+          parent_task_id: null,
         };
         queryClient.setQueryData<Task[]>(
           [TASKS_QUERY_KEY, variables.user_id],
@@ -217,5 +255,18 @@ export const useDeleteTask = () => {
     onSettled: (data, error, variables) => {
       queryClient.invalidateQueries({ queryKey: [TASKS_QUERY_KEY, variables.user_id] });
     },
+  });
+};
+
+/**
+ * Hook to fetch all unique tags for a user
+ */
+export const useUserTags = (user_id: string) => {
+  return useQuery({
+    queryKey: ['user-tags', user_id],
+    queryFn: async () => {
+      return apiClient<string[]>(`/api/v1/${user_id}/tasks/tags`);
+    },
+    enabled: !!user_id,
   });
 };

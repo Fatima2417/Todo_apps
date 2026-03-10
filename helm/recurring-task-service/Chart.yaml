@@ -1,0 +1,6 @@
+apiVersion: v2
+name: recurring-task-service
+description: Helm chart for Recurring Task Service microservice
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

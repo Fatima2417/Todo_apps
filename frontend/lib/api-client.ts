@@ -55,6 +55,15 @@ export const apiClient = async <T>(
     } catch (e) {
       // Use default message
     }
+
+    // Handle token expiration - redirect to login
+    if (response.status === 401 && errorMessage.toLowerCase().includes('token')) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('todo-app-auth');
+        window.location.href = '/auth/signin';
+      }
+    }
+
     throw new Error(errorMessage);
   }
 
@@ -81,11 +90,38 @@ apiClient.patch = <T>(endpoint: string, body: any, options?: ApiClientOptions) =
 apiClient.delete = <T>(endpoint: string, options?: ApiClientOptions) => 
   apiClient<T>(endpoint, { ...options, method: 'DELETE' });
 
+interface TaskListResponse {
+  tasks: Task[];
+  total: number;
+}
+
+interface GetTasksParams {
+  completed?: boolean;
+  priority?: string;
+  tags?: string;
+  q?: string;
+  status?: string;
+  due_date_from?: string;
+  due_date_to?: string;
+  sort_by?: string;
+  sort_order?: string;
+}
+
 // Helper functions for specific endpoints
 export const taskApi = {
-  // Get all tasks for a user
-  getTasks: async (user_id: string) => {
-    return apiClient<Task[]>(`/api/v1/${user_id}/tasks`);
+  // Get all tasks for a user with filters
+  getTasks: async (user_id: string, params?: GetTasksParams) => {
+    const queryParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          queryParams.append(key, String(value));
+        }
+      });
+    }
+    const queryString = queryParams.toString();
+    const endpoint = `/api/v1/${user_id}/tasks${queryString ? `?${queryString}` : ''}`;
+    return apiClient<TaskListResponse>(endpoint);
   },
 
   // Create a new task

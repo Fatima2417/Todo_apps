@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "audit-service.fullname" . }}
+  labels:
+    app: {{ include "audit-service.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "audit-service.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "audit-service.name" . }}
+      annotations:
+        dapr.io/enabled: "{{ .Values.dapr.enabled }}"
+        dapr.io/app-id: "{{ .Values.dapr.appId }}"
+        dapr.io/app-port: "{{ .Values.dapr.appPort }}"
+        dapr.io/log-level: "{{ .Values.dapr.logLevel }}"
+        dapr.io/config: "{{ .Values.dapr.config }}"
+    spec:
+      containers:
+      - name: audit-service
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.service.port }}
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}

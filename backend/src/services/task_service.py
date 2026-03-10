@@ -18,7 +18,19 @@ def create_task_for_user_service(*, db: Session, user_id: str, task_data: TaskCr
     return task
 
 
-def get_tasks_for_user_service(*, db: Session, user_id: str, completed_filter: Optional[bool] = None) -> List[TaskPublic]:
+def get_tasks_for_user_service(
+    *,
+    db: Session,
+    user_id: str,
+    completed_filter: Optional[bool] = None,
+    priority_filter: Optional[str] = None,
+    tags_filter: Optional[List[str]] = None,
+    search_query: Optional[str] = None,
+    due_date_from: Optional[str] = None,
+    due_date_to: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None
+) -> List[TaskPublic]:
     """
     Service function to get all tasks for a user.
     Orchestrates the business logic for task retrieval.
@@ -27,7 +39,18 @@ def get_tasks_for_user_service(*, db: Session, user_id: str, completed_filter: O
     # For example: pagination, sorting, etc.
 
     # Call the repository function to get tasks
-    tasks = repo.get_tasks_for_user(db=db, user_id=user_id, completed_filter=completed_filter)
+    tasks = repo.get_tasks_for_user(
+        db=db,
+        user_id=user_id,
+        completed_filter=completed_filter,
+        priority_filter=priority_filter,
+        tags_filter=tags_filter,
+        search_query=search_query,
+        due_date_from=due_date_from,
+        due_date_to=due_date_to,
+        sort_by=sort_by,
+        sort_order=sort_order
+    )
     return tasks
 
 
@@ -100,3 +123,13 @@ def toggle_task_completion_for_user_service(*, db: Session, task_id: int, user_i
     return updated_task
 
 toggle_task_completion_for_user = toggle_task_completion_for_user_service
+
+
+def get_user_tags_service(*, db: Session, user_id: str) -> List[str]:
+    """
+    Service function to get all unique tags used by a user.
+    """
+    tags = repo.get_user_tags(db=db, user_id=user_id)
+    return tags
+
+get_user_tags = get_user_tags_service

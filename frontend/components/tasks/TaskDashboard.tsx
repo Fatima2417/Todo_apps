@@ -1,16 +1,18 @@
 'use client';
 
-import { 
-  useTasks, 
-  useCreateTask, 
-  useUpdateTask, 
-  useDeleteTask, 
-  useToggleTaskCompletion 
+import {
+  useTasks,
+  useCreateTask,
+  useUpdateTask,
+  useDeleteTask,
+  useToggleTaskCompletion
 } from '@/lib/tasks-query';
 import { TaskList } from '@/components/tasks/TaskList';
 import { TaskForm } from '@/components/tasks/TaskForm';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Task } from '@/lib/types';
+import { useTaskStore } from '@/hooks/useTaskStore';
+import taskStore from '@/lib/taskStore';
 
 interface TaskDashboardProps {
   userId: string;
@@ -18,7 +20,8 @@ interface TaskDashboardProps {
 
 export function TaskDashboard({ userId }: TaskDashboardProps) {
   const { data: tasks, isLoading, error } = useTasks(userId);
-  
+  // No store sync needed - React Query is the single source of truth
+
   const createTaskMutation = useCreateTask();
   const updateTaskMutation = useUpdateTask();
   const deleteTaskMutation = useDeleteTask();
@@ -26,38 +29,108 @@ export function TaskDashboard({ userId }: TaskDashboardProps) {
 
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [editTask, setEditTask] = useState<Task | null>(null);
-  const [formValues, setFormValues] = useState({ title: '', description: '' });
+  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [formValues, setFormValues] = useState({
+    title: '',
+    description: '',
+    priority: 'medium' as 'low' | 'medium' | 'high',
+    tags: [] as string[],
+    due_date: '',
+    remind_at: '',
+    recurring_pattern: ''
+  });
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  // Helper function: Convert ISO date to datetime-local format (YYYY-MM-DDTHH:MM)
+  const isoToDatetimeLocal = (isoString: string | null): string => {
+    if (!isoString) return '';
+    try {
+      // Remove milliseconds and Z, keep YYYY-MM-DDTHH:MM:SS format
+      const date = new Date(isoString);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      return `${year}-${month}-${day}T${hours}:${minutes}`;
+    } catch (e) {
+      console.error('Error converting ISO to datetime-local:', e);
+      return '';
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormValues(prev => ({ ...prev, [name]: value }));
   };
 
+  const handleTagsChange = (tags: string[]) => {
+    setFormValues(prev => ({ ...prev, tags }));
+  };
+
   const handleSaveTask = async () => {
+    setErrorMessage('');
+
+    // 📝 Convert datetime-local format to ISO format for backend
+    const preparedData = {
+      title: formValues.title,
+      description: formValues.description || undefined,
+      priority: formValues.priority,
+      tags: formValues.tags,
+      // Convert datetime-local (YYYY-MM-DDTHH:MM) to ISO (YYYY-MM-DDTHH:MM:SS.sssZ)
+      due_date: formValues.due_date ? new Date(formValues.due_date).toISOString() : undefined,
+      remind_at: formValues.remind_at ? new Date(formValues.remind_at).toISOString() : undefined,
+      recurring_pattern: formValues.recurring_pattern || undefined
+    };
+
+    console.log('📤 Saving task with data:', {
+      original: formValues,
+      prepared: preparedData
+    });
+
     try {
       if (editTask) {
-        await updateTaskMutation.mutateAsync({
+        const result = await updateTaskMutation.mutateAsync({
           user_id: userId,
           task_id: editTask.id,
-          taskData: formValues
+          taskData: preparedData
         });
+        console.log('✅ Task updated, backend returned:', result);
+        // React Query auto-invalidates cache (see tasks-query.ts line 168)
       } else {
-        await createTaskMutation.mutateAsync({
+        const result = await createTaskMutation.mutateAsync({
           user_id: userId,
-          taskData: formValues
+          taskData: preparedData
         });
+        console.log('✅ Task created, backend returned:', result);
+        // React Query auto-invalidates cache (see tasks-query.ts line 123)
       }
       // Only close and reset if successful (mutateAsync throws if it fails)
       handleCancelForm();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving task:', err);
-      // Form stays open for the user to try again or see the error
+
+      // Parse user-friendly error messages
+      const errorStr = err?.message || String(err);
+
+      if (errorStr.includes('Reminder must be before due date') || errorStr.includes('chk_remind_before_due')) {
+        setErrorMessage('⚠️ The reminder time must be set before the due date. Please adjust your reminder time to be earlier than the due date.');
+      } else if (errorStr.includes('remind_at')) {
+        setErrorMessage('⚠️ There is an issue with the reminder time. Please make sure it is set before the due date.');
+      } else if (errorStr.includes('due_date')) {
+        setErrorMessage('⚠️ There is an issue with the due date. Please check the date format.');
+      } else {
+        setErrorMessage(`⚠️ Failed to save task. Please check your input and try again.`);
+      }
+
+      // Scroll to top to show error message
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
   const handleDeleteTask = async (taskId: number) => {
     try {
       await deleteTaskMutation.mutateAsync({ user_id: userId, task_id: taskId });
+      // React Query auto-invalidates cache (see tasks-query.ts line 256)
     } catch (err) {
       console.error('Error deleting task:', err);
     }
@@ -65,11 +138,12 @@ export function TaskDashboard({ userId }: TaskDashboardProps) {
 
   const handleToggleComplete = async (taskId: number, completed: boolean) => {
     try {
-      await toggleTaskMutation.mutateAsync({ 
-        user_id: userId, 
-        task_id: taskId, 
-        completed 
+      await toggleTaskMutation.mutateAsync({
+        user_id: userId,
+        task_id: taskId,
+        completed
       });
+      // React Query auto-invalidates cache (see tasks-query.ts line 220)
     } catch (err) {
       console.error('Error toggling task:', err);
     }
@@ -79,7 +153,12 @@ export function TaskDashboard({ userId }: TaskDashboardProps) {
     setEditTask(task);
     setFormValues({
       title: task.title,
-      description: task.description || ''
+      description: task.description || '',
+      priority: task.priority || 'medium',
+      tags: task.tags || [],
+      due_date: isoToDatetimeLocal(task.due_date),
+      remind_at: isoToDatetimeLocal(task.remind_at),
+      recurring_pattern: task.recurring_pattern || ''
     });
     setShowTaskForm(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -88,7 +167,16 @@ export function TaskDashboard({ userId }: TaskDashboardProps) {
   const handleCancelForm = () => {
     setShowTaskForm(false);
     setEditTask(null);
-    setFormValues({ title: '', description: '' });
+    setErrorMessage('');
+    setFormValues({
+      title: '',
+      description: '',
+      priority: 'medium',
+      tags: [],
+      due_date: '',
+      remind_at: '',
+      recurring_pattern: ''
+    });
   };
 
   return (
@@ -114,13 +202,23 @@ export function TaskDashboard({ userId }: TaskDashboardProps) {
           <h2 className="text-xl font-semibold mb-4 text-gray-800">
             {editTask ? 'Edit Task' : 'Create New Task'}
           </h2>
+
+          {/* Error Message Display */}
+          {errorMessage && (
+            <div className="mb-4 bg-red-50 border border-red-200 rounded-md p-4">
+              <p className="text-sm text-red-800">{errorMessage}</p>
+            </div>
+          )}
+
           <TaskForm
             task={editTask || undefined}
             onSave={handleSaveTask}
             onCancel={handleCancelForm}
             isLoading={createTaskMutation.isPending || updateTaskMutation.isPending}
+            userId={userId}
             value={formValues}
             onChange={handleInputChange}
+            onTagsChange={handleTagsChange}
           />
           {(createTaskMutation.isError || updateTaskMutation.isError) && (
             <p className="mt-2 text-red-600 text-sm">

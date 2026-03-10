@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { API_ENDPOINTS, API_BASE_URL } from '@/lib/config';
+import { useQueryClient } from '@tanstack/react-query';
 
 export function ChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
@@ -11,6 +12,7 @@ export function ChatWidget() {
   const [isLoading, setIsLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -26,6 +28,7 @@ export function ChatWidget() {
     if (!input.trim() || !user) return;
 
     const userMessage = { role: 'user', content: input };
+    const userInput = input; // Save input before clearing
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
@@ -35,12 +38,13 @@ export function ChatWidget() {
       if (!authData) {
         throw new Error('No authentication data found in localStorage. Please log in again.');
       }
-      
+
       const token = JSON.parse(authData).token;
       if (!token) {
         throw new Error('No token found in authentication data. Please log in again.');
       }
 
+      console.log('💬 Sending chat message:', userInput);
       console.log('Sending request to:', API_ENDPOINTS.CHAT);
 
       const response = await fetch(API_ENDPOINTS.CHAT, {
@@ -50,7 +54,7 @@ export function ChatWidget() {
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          message: input,
+          message: userInput,
           conversation_id: conversationId,
         }),
       });
@@ -61,17 +65,15 @@ export function ChatWidget() {
           const errorJson = await response.json();
           errorDetail = errorJson.detail || JSON.stringify(errorJson);
         } catch (e) {
-          // If not JSON, get the text
           errorDetail = await response.text();
         }
-        
+
         console.error('Backend error:', response.status, errorDetail);
-        
+
         if (response.status === 401) {
           throw new Error('Your session has expired or is invalid. Please log out and log in again.');
         }
-        
-        // Return the first 200 characters of the error to avoid UI breakage
+
         throw new Error(`Server Error (${response.status}): ${errorDetail.substring(0, 200)}`);
       }
 
@@ -83,13 +85,42 @@ export function ChatWidget() {
         console.error('Failed to parse response as JSON:', text);
         throw new Error('Invalid response format from server');
       }
+
+      console.log('📥 Chat response:', data);
+
       setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
       setConversationId(data.conversation_id);
+
+      // CRITICAL: Refresh tasks after ANY chat operation
+      // Check if tool calls exist
+      if (data.tool_calls && data.tool_calls.length > 0) {
+        console.log('🔧 Tool calls detected:', data.tool_calls.length, 'tools');
+        for (const call of data.tool_calls) {
+          console.log(`🔧 Processing tool: ${call.tool}`, call);
+        }
+
+        // Invalidate React Query cache to trigger automatic refetch
+        console.log('🔄 Invalidating tasks cache after tool calls...');
+        await queryClient.invalidateQueries({ queryKey: ['tasks', user.id] });
+        console.log('✅ Tasks cache invalidated - UI will auto-refresh');
+      } else {
+        // Even without tool calls, check if response mentions task operations
+        const responseText = data.response.toLowerCase();
+        const taskKeywords = ['created', 'added', 'updated', 'deleted', 'completed', 'task'];
+        const hasTaskOperation = taskKeywords.some(keyword => responseText.includes(keyword));
+
+        if (hasTaskOperation) {
+          console.log('🔍 Task operation detected in response text');
+          console.log('🔄 Invalidating tasks cache...');
+          await queryClient.invalidateQueries({ queryKey: ['tasks', user.id] });
+          console.log('✅ Tasks cache invalidated - UI will auto-refresh');
+        }
+      }
     } catch (error: any) {
       console.error('Chat error:', error);
-      setMessages(prev => [...prev, { 
-        role: 'assistant', 
-        content: `Error: ${error.message}. Please check if the backend is running at ${API_BASE_URL} and you are logged in.` 
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `Error: ${error.message}. Please check if the backend is running at ${API_BASE_URL} and you are logged in.`
       }]);
     } finally {
       setIsLoading(false);

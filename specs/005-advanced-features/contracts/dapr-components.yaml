@@ -1,0 +1,619 @@
+# Dapr Components Configuration
+
+**Feature**: 005-advanced-features
+**Date**: 2026-03-05
+**Version**: 1.0.0
+
+## Overview
+
+This document defines Dapr component configurations for Phase 5A. All components are deployed to Minikube and configured for local development.
+
+## Component Definitions
+
+### 1. Pub/Sub Component (Kafka)
+
+**File**: `helm/todo-backend/templates/dapr-components/pubsub.yaml`
+
+```yaml
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: pubsub
+  namespace: default
+spec:
+  type: pubsub.kafka
+  version: v1
+  metadata:
+    - name: brokers
+      value: "todo-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+    - name: authRequired
+      value: "false"
+    - name: consumerGroup
+      value: "todo-app"
+    - name: clientId
+      value: "todo-backend"
+    - name: maxMessageBytes
+      value: "1048576"  # 1MB
+    - name: version
+      value: "2.8.0"
+scopes:
+  - todo-backend
+  - recurring-task-service
+  - notification-service
+  - audit-service
+```
+
+**Configuration Notes**:
+- Connects to Strimzi Kafka cluster in `kafka` namespace
+- No authentication (local development only)
+- Consumer group per service for load balancing
+- 1MB max message size (sufficient for task events)
+
+---
+
+### 2. State Store Component (PostgreSQL)
+
+**File**: `helm/todo-backend/templates/dapr-components/statestore.yaml`
+
+```yaml
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: statestore
+  namespace: default
+spec:
+  type: state.postgresql
+  version: v1
+  metadata:
+    - name: connectionString
+      secretKeyRef:
+        name: todo-secrets
+        key: DATABASE_URL
+    - name: tableName
+      value: "dapr_state"
+    - name: metadataTableName
+      value: "dapr_state_metadata"
+    - name: timeoutInSeconds
+      value: "30"
+scopes:
+  - todo-backend
+  - recurring-task-service
+```
+
+**Configuration Notes**:
+- Uses existing Neon PostgreSQL database
+- Connection string from Kubernetes secret
+- Separate tables for Dapr state (not mixed with app tables)
+- Used for Dapr Jobs persistence
+
+---
+
+### 3. Secrets Component (Kubernetes)
+
+**File**: `helm/todo-backend/templates/dapr-components/secrets.yaml`
+
+```yaml
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: kubernetes-secrets
+  namespace: default
+spec:
+  type: secretstores.kubernetes
+  version: v1
+  metadata:
+    - name: vaultName
+      value: "todo-secrets"
+scopes:
+  - todo-backend
+  - recurring-task-service
+  - notification-service
+  - audit-service
+```
+
+**Configuration Notes**:
+- Reads from Kubernetes secrets
+- All services can access secrets via Dapr API
+- Secrets include: DATABASE_URL, COHERE_API_KEY, JWT_SECRET
+
+---
+
+### 4. Configuration Component (Kubernetes ConfigMap)
+
+**File**: `helm/todo-backend/templates/dapr-components/configuration.yaml`
+
+```yaml
+apiVersion: dapr.io/v1alpha1
+kind: Configuration
+metadata:
+  name: dapr-config
+  namespace: default
+spec:
+  tracing:
+    samplingRate: "1"
+    zipkin:
+      endpointAddress: "http://zipkin.default.svc.cluster.local:9411/api/v2/spans"
+  metric:
+    enabled: true
+  mtls:
+    enabled: false  # Disabled for local development
+  accessControl:
+    defaultAction: allow
+    trustDomain: "public"
+```
+
+**Configuration Notes**:
+- Tracing enabled for debugging (optional Zipkin)
+- Metrics enabled for monitoring
+- mTLS disabled (local development)
+- Open access control (no restrictions)
+
+---
+
+## Dapr Subscriptions
+
+### Recurring Task Service Subscription
+
+**File**: `microservices/recurring-task-service/subscription.yaml`
+
+```yaml
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: recurring-task-subscription
+  namespace: default
+spec:
+  topic: task-events
+  route: /task-completed
+  pubsubname: pubsub
+  metadata:
+    rawPayload: "false"
+  scopes:
+    - recurring-task-service
+```
+
+---
+
+### Notification Service Subscription
+
+**File**: `microservices/notification-service/subscription.yaml`
+
+```yaml
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: notification-subscription
+  namespace: default
+spec:
+  topic: reminders
+  route: /reminder-due
+  pubsubname: pubsub
+  metadata:
+    rawPayload: "false"
+  scopes:
+    - notification-service
+```
+
+---
+
+### Audit Service Subscription
+
+**File**: `microservices/audit-service/subscription.yaml`
+
+```yaml
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: audit-subscription
+  namespace: default
+spec:
+  topic: task-events
+  route: /audit-event
+  pubsubname: pubsub
+  metadata:
+    rawPayload: "false"
+  scopes:
+    - audit-service
+```
+
+---
+
+## Dapr Sidecar Annotations
+
+### Backend Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: todo-backend
+  namespace: default
+spec:
+  template:
+    metadata:
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "todo-backend"
+        dapr.io/app-port: "8000"
+        dapr.io/app-protocol: "http"
+        dapr.io/log-level: "info"
+        dapr.io/sidecar-cpu-limit: "200m"
+        dapr.io/sidecar-memory-limit: "128Mi"
+        dapr.io/sidecar-cpu-request: "100m"
+        dapr.io/sidecar-memory-request: "64Mi"
+    spec:
+      containers:
+        - name: backend
+          image: todo-backend:latest
+          ports:
+            - containerPort: 8000
+```
+
+---
+
+### Recurring Task Service Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recurring-task-service
+  namespace: default
+spec:
+  template:
+    metadata:
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "recurring-task-service"
+        dapr.io/app-port: "8001"
+        dapr.io/app-protocol: "http"
+        dapr.io/log-level: "info"
+        dapr.io/sidecar-cpu-limit: "200m"
+        dapr.io/sidecar-memory-limit: "128Mi"
+    spec:
+      containers:
+        - name: recurring-task-service
+          image: recurring-task-service:latest
+          ports:
+            - containerPort: 8001
+```
+
+---
+
+### Notification Service Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: default
+spec:
+  template:
+    metadata:
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "notification-service"
+        dapr.io/app-port: "8002"
+        dapr.io/app-protocol: "http"
+        dapr.io/log-level: "info"
+        dapr.io/sidecar-cpu-limit: "200m"
+        dapr.io/sidecar-memory-limit: "128Mi"
+    spec:
+      containers:
+        - name: notification-service
+          image: notification-service:latest
+          ports:
+            - containerPort: 8002
+```
+
+---
+
+### Audit Service Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-service
+  namespace: default
+spec:
+  template:
+    metadata:
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "audit-service"
+        dapr.io/app-port: "8003"
+        dapr.io/app-protocol: "http"
+        dapr.io/log-level: "info"
+        dapr.io/sidecar-cpu-limit: "200m"
+        dapr.io/sidecar-memory-limit: "128Mi"
+    spec:
+      containers:
+        - name: audit-service
+          image: audit-service:latest
+          ports:
+            - containerPort: 8003
+```
+
+---
+
+## Dapr Jobs API Usage
+
+### Schedule Reminder Job
+
+```python
+import httpx
+from datetime import datetime
+
+async def schedule_reminder(task_id: int, user_id: int, remind_at: datetime):
+    """
+    Schedule a reminder using Dapr Jobs API (alpha)
+    """
+    job_id = f"reminder-{task_id}"
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "http://localhost:3500/v1.0-alpha1/jobs/reminders",
+            json={
+                "schedule": remind_at.isoformat(),
+                "data": {
+                    "task_id": task_id,
+                    "user_id": user_id
+                },
+                "dueTime": remind_at.isoformat()
+            }
+        )
+        response.raise_for_status()
+        return job_id
+```
+
+### Cancel Reminder Job
+
+```python
+async def cancel_reminder(task_id: int):
+    """
+    Cancel a scheduled reminder
+    """
+    job_id = f"reminder-{task_id}"
+
+    async with httpx.AsyncClient() as client:
+        response = await client.delete(
+            f"http://localhost:3500/v1.0-alpha1/jobs/reminders/{job_id}"
+        )
+        response.raise_for_status()
+```
+
+### Job Handler Endpoint
+
+```python
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.post("/jobs/reminder-handler")
+async def handle_reminder(job_data: dict):
+    """
+    Dapr Jobs callback endpoint
+    """
+    task_id = job_data["data"]["task_id"]
+    user_id = job_data["data"]["user_id"]
+
+    # Fetch task details
+    task = await get_task(task_id)
+
+    # Publish reminder.due event
+    await publish_event(
+        event_type="reminder.due.v1",
+        user_id=user_id,
+        task_id=task_id,
+        data={
+            "title": task.title,
+            "due_date": task.due_date.isoformat(),
+            "priority": task.priority,
+            "tags": task.tags,
+            "hours_until_due": calculate_hours_until_due(task.due_date)
+        }
+    )
+
+    return {"status": "processed"}
+```
+
+---
+
+## Resource Requirements
+
+### Dapr Sidecar Resources (per pod)
+
+```yaml
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+```
+
+**Total Dapr Overhead**:
+- 5 pods with sidecars (backend + 3 microservices + frontend if needed)
+- Total: ~320MB memory, ~0.5 CPU
+
+---
+
+## Installation Steps
+
+### 1. Install Dapr on Minikube
+
+```bash
+# Install Dapr CLI
+wget -q https://raw.githubusercontent.com/dapr/cli/master/install/install.sh -O - | /bin/bash
+
+# Initialize Dapr on Minikube
+dapr init --kubernetes --wait
+
+# Verify installation
+dapr status -k
+```
+
+### 2. Apply Dapr Components
+
+```bash
+# Apply all components
+kubectl apply -f helm/todo-backend/templates/dapr-components/
+
+# Verify components
+kubectl get components -n default
+```
+
+### 3. Deploy Services with Dapr Sidecars
+
+```bash
+# Backend
+helm install todo-backend ./helm/todo-backend
+
+# Microservices
+helm install recurring-task-service ./helm/recurring-task-service
+helm install notification-service ./helm/notification-service
+helm install audit-service ./helm/audit-service
+
+# Verify sidecars injected
+kubectl get pods -n default
+# Should see 2/2 READY (app + sidecar)
+```
+
+---
+
+## Testing Dapr Components
+
+### Test Pub/Sub
+
+```bash
+# Publish test event
+curl -X POST http://localhost:3500/v1.0/publish/pubsub/task-events \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_id": "test-123",
+    "event_type": "task.created.v1",
+    "event_version": "v1",
+    "timestamp": "2026-03-05T21:00:00Z",
+    "user_id": 1,
+    "task_id": 1,
+    "data": {"title": "Test task"}
+  }'
+```
+
+### Test State Store
+
+```bash
+# Save state
+curl -X POST http://localhost:3500/v1.0/state/statestore \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "key": "test-key",
+    "value": "test-value"
+  }]'
+
+# Get state
+curl http://localhost:3500/v1.0/state/statestore/test-key
+```
+
+### Test Secrets
+
+```bash
+# Get secret
+curl http://localhost:3500/v1.0/secrets/kubernetes-secrets/DATABASE_URL
+```
+
+---
+
+## Troubleshooting
+
+### Sidecar Not Injected
+
+```bash
+# Check Dapr installation
+dapr status -k
+
+# Check pod annotations
+kubectl describe pod <pod-name>
+
+# Check Dapr logs
+kubectl logs <pod-name> -c daprd
+```
+
+### Pub/Sub Not Working
+
+```bash
+# Check Kafka connectivity
+kubectl exec -it <pod-name> -c daprd -- curl http://localhost:3500/v1.0/metadata
+
+# Check component status
+kubectl get component pubsub -o yaml
+
+# Check Kafka broker
+kubectl get kafka -n kafka
+```
+
+### Jobs Not Triggering
+
+```bash
+# Check Dapr Jobs API availability
+curl http://localhost:3500/v1.0-alpha1/jobs
+
+# Check state store connectivity
+kubectl logs <pod-name> -c daprd | grep state
+
+# Verify job was scheduled
+kubectl logs <pod-name> -c daprd | grep "job scheduled"
+```
+
+---
+
+## Security Considerations
+
+### Local Development
+
+- No mTLS (disabled for simplicity)
+- No Kafka authentication (local cluster)
+- Secrets in Kubernetes secrets (not encrypted at rest)
+- Open access control (all services can call each other)
+
+### Production (Phase 5B)
+
+- Enable mTLS for service-to-service communication
+- Enable Kafka SASL/SSL authentication
+- Use external secret store (Azure Key Vault, AWS Secrets Manager)
+- Implement access control policies
+- Enable Dapr API token authentication
+
+---
+
+## Monitoring
+
+### Dapr Metrics
+
+```bash
+# Port-forward to Dapr metrics endpoint
+kubectl port-forward <pod-name> 9090:9090
+
+# Query metrics
+curl http://localhost:9090/metrics
+```
+
+**Key Metrics**:
+- `dapr_component_loaded`: Component initialization status
+- `dapr_pubsub_ingress_count`: Events received
+- `dapr_pubsub_egress_count`: Events published
+- `dapr_state_operation_count`: State operations
+- `dapr_sidecar_injected`: Sidecar injection count
+
+---
+
+## Next Steps
+
+1. Create quickstart.md with setup instructions
+2. Implement event publishing in backend
+3. Implement microservices with Dapr subscriptions
+4. Test end-to-end event flow
+5. Monitor Dapr metrics and logs

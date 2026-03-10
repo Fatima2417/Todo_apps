@@ -5,6 +5,8 @@ import { Inter } from 'next/font/google';
 import { AuthProvider } from '@/lib/auth-context';
 import QueryProvider from '@/lib/query-provider';
 import { ChatWidget } from '@/components/chat/ChatWidget';
+import { TaskProviderWrapper } from '@/components/TaskProviderWrapper';
+import DebugPanel from '@/components/DebugPanel';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -23,13 +25,16 @@ export default function RootLayout({
       <body className={inter.className}>
         <QueryProvider>
           <AuthProvider>
-            <div className="min-h-screen bg-gray-50">
-              {/* Header will be added here */}
-              <main className="container mx-auto py-6 px-4">
-                {children}
-              </main>
-              <ChatWidget />
-            </div>
+            <TaskProviderWrapper>
+              <div className="min-h-screen bg-gray-50">
+                {/* Header will be added here */}
+                <main className="container mx-auto py-6 px-4">
+                  {children}
+                </main>
+                <ChatWidget />
+                <DebugPanel />
+              </div>
+            </TaskProviderWrapper>
           </AuthProvider>
         </QueryProvider>
       </body>

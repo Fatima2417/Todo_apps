@@ -1,0 +1,459 @@
+# Event Schemas: Phase 5A - Kafka Topics
+
+**Feature**: 005-advanced-features
+**Date**: 2026-03-05
+**Version**: v1
+
+## Overview
+
+This document defines event schemas for Kafka topics used in the event-driven architecture. All events follow a consistent structure with versioning support.
+
+## Kafka Topics
+
+| Topic Name | Partitions | Replication Factor | Retention | Purpose |
+|------------|------------|-------------------|-----------|---------|
+| task-events | 3 | 1 | 7 days | All task CRUD operations |
+| reminders | 1 | 1 | 1 day | Reminder trigger events |
+| task-updates | 3 | 1 | 1 day | Real-time UI sync events |
+
+**Partition Key**: `user_id` for task-events and task-updates, `task_id` for reminders
+
+## Base Event Structure
+
+All events follow this structure:
+
+```json
+{
+  "event_id": "string (UUID)",
+  "event_type": "string (e.g., task.created.v1)",
+  "event_version": "string (e.g., v1)",
+  "timestamp": "string (ISO 8601 datetime)",
+  "user_id": "integer",
+  "task_id": "integer",
+  "data": "object (event-specific payload)"
+}
+```
+
+## Event Type Definitions
+
+### 1. task.created.v1
+
+**Topic**: task-events
+**Description**: Published when a new task is created
+**Trigger**: POST /api/{user_id}/tasks
+
+**Schema**:
+```json
+{
+  "event_id": "550e8400-e29b-41d4-a716-446655440000",
+  "event_type": "task.created.v1",
+  "event_version": "v1",
+  "timestamp": "2026-03-05T21:00:00Z",
+  "user_id": 123,
+  "task_id": 456,
+  "data": {
+    "title": "Finish quarterly report",
+    "description": "Complete Q1 2026 financial report",
+    "priority": "high",
+    "tags": ["work", "finance", "deadline"],
+    "due_date": "2026-03-31T17:00:00Z",
+    "remind_at": "2026-03-31T09:00:00Z",
+    "recurring_pattern": null,
+    "is_recurring": false,
+    "parent_task_id": null
+  }
+}
+```
+
+**Consumers**:
+- Audit Service (logs event)
+
+---
+
+### 2. task.updated.v1
+
+**Topic**: task-events
+**Description**: Published when a task is modified
+**Trigger**: PUT /api/{user_id}/tasks/{task_id}
+
+**Schema**:
+```json
+{
+  "event_id": "550e8400-e29b-41d4-a716-446655440001",
+  "event_type": "task.updated.v1",
+  "event_version": "v1",
+  "timestamp": "2026-03-05T21:05:00Z",
+  "user_id": 123,
+  "task_id": 456,
+  "data": {
+    "before": {
+      "title": "Finish quarterly report",
+      "priority": "medium",
+      "tags": ["work"]
+    },
+    "after": {
+      "title": "Finish quarterly report",
+      "priority": "high",
+      "tags": ["work", "finance", "deadline"]
+    },
+    "changed_fields": ["priority", "tags"]
+  }
+}
+```
+
+**Consumers**:
+- Audit Service (logs event)
+- Real-time sync service (future)
+
+---
+
+### 3. task.deleted.v1
+
+**Topic**: task-events
+**Description**: Published when a task is deleted
+**Trigger**: DELETE /api/{user_id}/tasks/{task_id}
+
+**Schema**:
+```json
+{
+  "event_id": "550e8400-e29b-41d4-a716-446655440002",
+  "event_type": "task.deleted.v1",
+  "event_version": "v1",
+  "timestamp": "2026-03-05T21:10:00Z",
+  "user_id": 123,
+  "task_id": 456,
+  "data": {
+    "title": "Finish quarterly report",
+    "was_completed": false,
+    "had_reminder": true
+  }
+}
+```
+
+**Consumers**:
+- Audit Service (logs event)
+- Reminder Service (cancels scheduled reminder)
+
+---
+
+### 4. task.completed.v1
+
+**Topic**: task-events
+**Description**: Published when a task is marked complete
+**Trigger**: PATCH /api/{user_id}/tasks/{task_id}/complete (when marking complete)
+
+**Schema**:
+```json
+{
+  "event_id": "550e8400-e29b-41d4-a716-446655440003",
+  "event_type": "task.completed.v1",
+  "event_version": "v1",
+  "timestamp": "2026-03-05T21:15:00Z",
+  "user_id": 123,
+  "task_id": 456,
+  "data": {
+    "title": "Weekly team meeting",
+    "completed_at": "2026-03-05T21:15:00Z",
+    "is_recurring": true,
+    "recurring_pattern": "weekly",
+    "due_date": "2026-03-05T15:00:00Z"
+  }
+}
+```
+
+**Consumers**:
+- Audit Service (logs event)
+- Recurring Task Service (creates next occurrence if is_recurring=true)
+
+---
+
+### 5. task.uncompleted.v1
+
+**Topic**: task-events
+**Description**: Published when a completed task is marked incomplete
+**Trigger**: PATCH /api/{user_id}/tasks/{task_id}/complete (when unmarking complete)
+
+**Schema**:
+```json
+{
+  "event_id": "550e8400-e29b-41d4-a716-446655440004",
+  "event_type": "task.uncompleted.v1",
+  "event_version": "v1",
+  "timestamp": "2026-03-05T21:20:00Z",
+  "user_id": 123,
+  "task_id": 456,
+  "data": {
+    "title": "Finish quarterly report",
+    "was_completed_at": "2026-03-05T21:15:00Z"
+  }
+}
+```
+
+**Consumers**:
+- Audit Service (logs event)
+
+---
+
+### 6. task.recurring.completed.v1
+
+**Topic**: task-events
+**Description**: Published when a recurring task is completed AND new occurrence is created
+**Trigger**: Recurring Task Service after processing task.completed.v1
+
+**Schema**:
+```json
+{
+  "event_id": "550e8400-e29b-41d4-a716-446655440005",
+  "event_type": "task.recurring.completed.v1",
+  "event_version": "v1",
+  "timestamp": "2026-03-05T21:15:05Z",
+  "user_id": 123,
+  "task_id": 789,
+  "data": {
+    "original_task_id": 456,
+    "original_title": "Weekly team meeting",
+    "new_task_id": 789,
+    "new_due_date": "2026-03-12T15:00:00Z",
+    "recurring_pattern": "weekly",
+    "next_occurrence_number": 2
+  }
+}
+```
+
+**Consumers**:
+- Audit Service (logs event)
+- Notification Service (optional: notify user of new task)
+
+---
+
+### 7. reminder.due.v1
+
+**Topic**: reminders
+**Description**: Published when a reminder time is reached
+**Trigger**: Dapr Jobs API callback to backend
+
+**Schema**:
+```json
+{
+  "event_id": "550e8400-e29b-41d4-a716-446655440006",
+  "event_type": "reminder.due.v1",
+  "event_version": "v1",
+  "timestamp": "2026-03-31T09:00:00Z",
+  "user_id": 123,
+  "task_id": 456,
+  "data": {
+    "title": "Finish quarterly report",
+    "due_date": "2026-03-31T17:00:00Z",
+    "priority": "high",
+    "tags": ["work", "finance"],
+    "hours_until_due": 8
+  }
+}
+```
+
+**Consumers**:
+- Notification Service (sends browser notification)
+- Audit Service (logs event)
+
+---
+
+## Event Publishing Pattern
+
+### Backend Service (FastAPI)
+
+```python
+import httpx
+from datetime import datetime
+import uuid
+
+async def publish_event(event_type: str, user_id: int, task_id: int, data: dict):
+    """
+    Publish event to Kafka via Dapr Pub/Sub
+    """
+    event = {
+        "event_id": str(uuid.uuid4()),
+        "event_type": event_type,
+        "event_version": "v1",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "user_id": user_id,
+        "task_id": task_id,
+        "data": data
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                "http://localhost:3500/v1.0/publish/pubsub/task-events",
+                json=event,
+                timeout=5.0
+            )
+            response.raise_for_status()
+        except Exception as e:
+            # Log error but don't block user action
+            logger.error(f"Failed to publish event {event_type}: {e}")
+
+# Usage in endpoint
+@app.post("/api/{user_id}/tasks")
+async def create_task(user_id: int, task: TaskCreate):
+    # Create task in database
+    new_task = await task_service.create(user_id, task)
+
+    # Publish event
+    await publish_event(
+        event_type="task.created.v1",
+        user_id=user_id,
+        task_id=new_task.id,
+        data={
+            "title": new_task.title,
+            "description": new_task.description,
+            "priority": new_task.priority,
+            "tags": new_task.tags,
+            "due_date": new_task.due_date.isoformat() if new_task.due_date else None,
+            "remind_at": new_task.remind_at.isoformat() if new_task.remind_at else None,
+            "recurring_pattern": new_task.recurring_pattern,
+            "is_recurring": new_task.is_recurring,
+            "parent_task_id": new_task.parent_task_id
+        }
+    )
+
+    return new_task
+```
+
+## Event Consumption Pattern
+
+### Microservice (Recurring Task Service)
+
+```python
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+class CloudEvent(BaseModel):
+    id: str
+    source: str
+    type: str
+    datacontenttype: str
+    data: dict
+
+@app.post("/task-completed")
+async def handle_task_completed(event: CloudEvent):
+    """
+    Dapr subscription endpoint for task.completed.v1 events
+    """
+    if event.type != "task.completed.v1":
+        return {"status": "ignored"}
+
+    data = event.data
+
+    # Check if recurring
+    if not data.get("is_recurring"):
+        return {"status": "not_recurring"}
+
+    # Calculate next occurrence
+    next_due_date = calculate_next_occurrence(
+        data["due_date"],
+        data["recurring_pattern"]
+    )
+
+    # Create new task
+    new_task = await create_recurring_task(
+        user_id=data["user_id"],
+        original_task_id=data["task_id"],
+        title=data["title"],
+        due_date=next_due_date,
+        recurring_pattern=data["recurring_pattern"]
+    )
+
+    # Publish recurring.completed event
+    await publish_event(
+        event_type="task.recurring.completed.v1",
+        user_id=data["user_id"],
+        task_id=new_task.id,
+        data={
+            "original_task_id": data["task_id"],
+            "original_title": data["title"],
+            "new_task_id": new_task.id,
+            "new_due_date": next_due_date.isoformat(),
+            "recurring_pattern": data["recurring_pattern"]
+        }
+    )
+
+    return {"status": "processed", "new_task_id": new_task.id}
+```
+
+### Dapr Subscription Configuration
+
+```yaml
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: recurring-task-subscription
+spec:
+  topic: task-events
+  route: /task-completed
+  pubsubname: pubsub
+  metadata:
+    rawPayload: "false"
+  scopes:
+    - recurring-task-service
+```
+
+## Error Handling
+
+### Event Publishing Failures
+
+- Log error with full event details
+- Do NOT block user action (fire-and-forget pattern)
+- Monitor failure rate (alert if >1%)
+- Retry not implemented (accept eventual consistency)
+
+### Event Consumption Failures
+
+- Dapr handles retries automatically (exponential backoff)
+- Dead letter queue after 3 retries
+- Manual intervention required for DLQ messages
+- Idempotent handlers (use event_id to detect duplicates)
+
+## Monitoring & Observability
+
+### Metrics to Track
+
+- Events published per type (counter)
+- Event publishing failures (counter)
+- Event processing latency (histogram)
+- Consumer lag (gauge)
+- Dead letter queue size (gauge)
+
+### Logging
+
+- Log all published events at INFO level
+- Log all consumed events at INFO level
+- Log failures at ERROR level with full context
+- Include event_id in all log messages for tracing
+
+## Schema Evolution
+
+### Adding New Fields (Backward Compatible)
+
+1. Add optional field to event data
+2. Increment patch version (v1.1)
+3. Update this document
+4. Deploy consumers first (can ignore new field)
+5. Deploy producers (start sending new field)
+
+### Breaking Changes (Not Backward Compatible)
+
+1. Create new event type with incremented major version (v2)
+2. Deploy consumers for v2 events
+3. Deploy producers to send both v1 and v2 (dual-write period)
+4. Monitor v1 consumer lag until zero
+5. Remove v1 event publishing
+6. Deprecate v1 consumers after 30 days
+
+## Next Steps
+
+1. Create contracts/dapr-components.yaml with Dapr Pub/Sub configuration
+2. Implement event publishing in backend service
+3. Implement microservices with event consumers
+4. Set up monitoring for event metrics
