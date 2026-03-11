@@ -18,11 +18,19 @@ export interface NotificationAction {
  * Extended NotificationOptions that includes experimental/non-standard properties
  * like actions, which are supported in some browsers but not in the standard TypeScript definitions.
  */
-export interface ExtendedNotificationOptions extends NotificationOptions {
+export interface ExtendedNotificationOptions {
+  body?: string;
+  icon?: string;
+  badge?: string;
+  tag?: string;
+  data?: any;
+  requireInteraction?: boolean;
+  dir?: NotificationDirection;
+  lang?: string;
+  silent?: boolean;
   actions?: NotificationAction[];
   vibrate?: number | number[];
   renotify?: boolean;
-  silent?: boolean;
 }
 
 /**
