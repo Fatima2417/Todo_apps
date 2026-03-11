@@ -38,18 +38,13 @@ export function ReminderNotification({
     setPermission(perm);
 
     if (perm === 'granted') {
-      // Build base notification options
-      const baseOptions: NotificationOptions = {
+      // Build notification options directly with ExtendedNotificationOptions type
+      const options: ExtendedNotificationOptions = {
         body: `Reminder: ${taskTitle}`,
         icon: '/favicon.ico',
         badge: '/favicon.ico',
         tag: `task-${taskId}`,
         requireInteraction: true
-      };
-
-      // Build extended options with actions if supported
-      const options: ExtendedNotificationOptions = {
-        ...baseOptions
       };
 
       // Only add actions if supported by the browser
