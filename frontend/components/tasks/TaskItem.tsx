@@ -29,7 +29,7 @@ export function TaskItem({ task, userId, onEdit, onDelete }: TaskItemProps) {
     priority: task.priority,
     tags: task.tags,
     hasPriority: !!task.priority,
-    hasTags: task.tags?.length > 0,
+    hasTags: (task.tags?.length ?? 0) > 0,
     priorityType: typeof task.priority,
     tagsType: typeof task.tags,
     rawTask: task
