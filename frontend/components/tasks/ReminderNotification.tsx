@@ -1,6 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import {
+  ExtendedNotificationOptions,
+  areNotificationActionsSupported,
+  areNotificationsAvailable,
+  requestNotificationPermission,
+  createNotification
+} from '@/lib/notificationTypes';
 
 interface ReminderNotificationProps {
   taskId: number;
@@ -25,45 +32,48 @@ export function ReminderNotification({
     }
   }, []);
 
-  const requestPermission = async () => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      const result = await Notification.requestPermission();
-      setPermission(result);
-      return result;
-    }
-    return Notification.permission;
-  };
-
   const showNotification = async () => {
-    const perm = await requestPermission();
+    // Request permission if needed
+    const perm = await requestNotificationPermission();
+    setPermission(perm);
 
     if (perm === 'granted') {
-      const notification = new Notification('Task Reminder', {
+      // Build notification options with type safety
+      const options: ExtendedNotificationOptions = {
         body: `Reminder: ${taskTitle}`,
         icon: '/favicon.ico',
         badge: '/favicon.ico',
         tag: `task-${taskId}`,
-        requireInteraction: true,
-        actions: [
+        requireInteraction: true
+      };
+
+      // Only add actions if supported by the browser
+      if (areNotificationActionsSupported()) {
+        options.actions = [
           { action: 'snooze-10', title: 'Snooze 10 min' },
           { action: 'snooze-60', title: 'Snooze 1 hour' },
           { action: 'dismiss', title: 'Dismiss' }
-        ]
-      });
+        ];
+      }
 
-      notification.onclick = () => {
-        window.focus();
-        notification.close();
-      };
+      // Create notification with proper type handling
+      const notification = createNotification('Task Reminder', options);
 
-      // Handle notification actions (if supported)
-      if ('actions' in notification) {
-        // Note: Service Worker needed for action buttons
-        // For now, show in-app notification as fallback
+      if (notification) {
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+
+        // Note: Action buttons require Service Worker for full functionality
+        // Show in-app notification as fallback for better UX
+        setShowInApp(true);
+      } else {
+        // Fallback to in-app notification if browser notification failed
         setShowInApp(true);
       }
     } else {
-      // Fallback to in-app notification
+      // Fallback to in-app notification if permission denied
       setShowInApp(true);
     }
   };
@@ -149,13 +159,10 @@ export function useNotificationPermission() {
   }, []);
 
   const requestPermission = async () => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      const result = await Notification.requestPermission();
-      setPermission(result);
-      return result;
-    }
-    return Notification.permission;
+    const result = await requestNotificationPermission();
+    setPermission(result);
+    return result;
   };
 
-  return { permission, requestPermission };
+  return { permission, requestPermission, isAvailable: areNotificationsAvailable() };
 }
